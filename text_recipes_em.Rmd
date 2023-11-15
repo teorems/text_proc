@@ -1,0 +1,129 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+# Récupération des données
+
+```{r}
+library(readr)
+rr <- readr::read_tsv("Restaurant_Reviews.tsv", col_types = "cf")
+head(rr)
+```
+
+# Bout du projet
+
+A partir du dataset `Restaurant_Reviews.tsv`, qui contient `nrow(rr)` critiques de restaurants, [source] labellisées en 2 categories, 0 negative et 1 positive, nous allons developper un modele de ML (classifier) qui permet de predire la categorie des nouvelles données.
+
+
+# Définition du modele
+
+```{r}
+# Install required packages if not already installed
+# install.packages(c("tidymodels", "textrecipes"))
+
+# Load required libraries
+library(tidymodels)
+library(textrecipes)
+
+# Assuming your data frame is named 'restaurant_data'
+# Make sure 'liked' is a binary outcome variable (0 or 1)
+
+# Split the data into training and testing sets
+set.seed(123)
+split <- initial_split(rr, prop = 0.7)
+train_data <- training(split)
+test_data <- testing(split)
+
+# Create a recipe for modeling
+recipe <- recipe(Liked ~ Review, data = train_data) %>%
+  step_tokenize(Review) %>%
+  step_tokenfilter(Review) %>%
+  step_tfidf(Review) 
+
+recipe
+
+# Create a logistic regression model
+log_reg <- logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+
+
+# Create a workflow
+workflow <- workflow() %>%
+  add_model(log_reg) %>%
+  add_recipe(recipe)
+
+workflow
+
+# Train the model
+model <- workflow %>% fit(train_data)
+
+# Make predictions on the test set
+predictions <- predict(model, new_data = test_data)
+
+# result tibble
+
+res <- bind_cols(predictions, test_data |>  select(Liked))
+
+# Evaluate the model
+conf_matrix <- conf_mat(cbind(predictions,Liked = test_data$Liked), truth = Liked, estimate = .pred_class)
+conf_matrix
+
+# Print the confusion matrix
+autoplot(conf_matrix)
+
+# Calculate model accuracy
+cbind(predictions,Liked = test_data$Liked) |> metric_set(accuracy)
+
+```
+
+```{r wf_map}
+
+rf <-  rand_forest(mode = "classification", mtry = tune(), trees = tune(), min_n = tune()) 
+
+ws <- workflow_set(preproc = list(recipe), models = list(log_reg, rf))
+
+rr_cv <- vfold_cv(train_data)
+
+res <- workflow_map(ws, resamples = rr_cv)
+
+res |> collect_metrics()
+
+autoplot(res)
+
+```
+
+
+# text embeddings
+
+```{r}
+library(text)
+# !! operation assez longue !!
+#rr_emb <- textEmbed(rr)
+# Completed layers output for Review (variable: 1/1, duration: 4.267763 mins).
+# Completed layers aggregation for word_type_embeddings. 
+# Completed layers aggregation (variable 1/1, duration: 7.010227 mins).
+# Completed layers aggregation (variable 1/1, duration: 7.108091 mins).
+rr_emb <- readRDS("rr_embeddings_bert_uncased.Rds")
+```
+
+
+The textEmbed() function automatically transforms character variables in a given tibble to word embeddings. 
+
+> A word embedding comprises values that represent the latent meaning of a word.The numbers may be seen as coordinates in a space that comprises several hundred dimensions. The more similar two words’ embeddings are, the closer positioned they are in this embedding space, and thus, the more similar the words are in meaning. Hence, embeddings reflect the relationships among words, where proximity in the embedding space represents similarity in latent meaning. 
+
+#textTrain(): Examine the relationship between text and numeric variables
+
+The textTrain() is used to examine how well the word embeddings from a text can predict a numeric variable. This is done by training the word embeddings using ridge regression and 10-fold cross-validation. In the example below we examine how well the harmony text responses can predict the rating scale scores from the Harmony in life scale.
+
+```{r}
+# Examine the relationship between harmonytext word embeddings and the harmony in life rating scale
+
+model_htext_hils <- textTrain(word_embeddings$texts$harmonywords, 
+                              Language_based_assessment_data_8$hilstotal)
+
+# Examine the correlation between predicted and observed Harmony in life scale scores
+model_htext_hils$results
+
+```

@@ -1,0 +1,140 @@
+```{r}
+library(recipes)
+library(textrecipes)
+library(modeldata)
+library(parsnip)
+library(yardstick)
+library(readr)
+```
+
+# Récupération des données
+
+```{r}
+rr <- readr::read_tsv("Restaurant_Reviews.tsv")
+```
+
+# Définition de la recipe (tokenization, stopwords, tf-idf)
+
+```{r}
+okc_rec <- recipe(Liked ~ Review, data = rr) %>%
+  step_tokenize(Review) %>%
+  step_stopwords(Review) %>%
+  step_tokenfilter(Review, max_tokens = 1000) %>%
+  step_tfidf(Review)
+
+okc_obj <- okc_rec %>%
+  prep()
+
+str(bake(okc_obj, rr))
+```
+
+# Isolation des données X
+
+```{r}
+X <- okc_obj$template
+```
+
+```{r}
+dim(X)
+```
+
+```{r}
+str(X)
+```
+
+```{r}
+rf_model <- rand_forest(mode = "classification") %>%
+  set_engine("randomForest") %>%
+  set_mode("classification") %>%
+  set_args(ntree = 100)
+```
+
+```{r}
+rf_model <- rand_forest(mode = "classification", mtry = 5, trees = 100, engine = "randomForest")
+```
+
+# Spécification de la formule
+
+Utilise le tf/idf pour predire `liked`.
+
+```{r}
+
+formula <- as.formula("Liked ~ .")
+#rf_spec <- rf_model %>% set_mode("classification") %>% set_engine("randomForest", formula = formula)
+```
+
+```{r}
+X$Liked <- as.factor(X$Liked)
+```
+
+```{r}
+# Diviser les données en ensemble d'entraînement et ensemble de test
+set.seed(123)  # Pour la reproductibilité
+indices <- sample(1:nrow(X), 0.8 * nrow(X))
+train_data <- X[indices, ]
+test_data <- X[-indices, ]
+```
+
+```{r}
+dim(train_data)
+```
+
+```{r}
+dim(test_data)
+```
+
+```{r}
+str(train_data)
+```
+
+```{r}
+# Entraîner
+rf_fit <- fit(rf_model, formula, data = train_data)
+```
+
+```{r}
+# Prédictions
+predictions <- predict(rf_fit, new_data = test_data)
+```
+
+```{r}
+str(predictions$.pred_class)
+```
+
+```{r}
+# accuracy
+(sum(predictions$.pred_class==test_data$Liked, na.rm=T) + sum(is.na(predictions$.pred_class) & is.na(test_data$Liked))) / length(predictions$.pred_class)
+```
+
+# text embeddings
+
+```{r}
+library(text)
+# !! operation assez longue !!
+#rr_emb <- textEmbed(rr)
+# Completed layers output for Review (variable: 1/1, duration: 4.267763 mins).
+# Completed layers aggregation for word_type_embeddings. 
+# Completed layers aggregation (variable 1/1, duration: 7.010227 mins).
+# Completed layers aggregation (variable 1/1, duration: 7.108091 mins).
+rr_emb <- readRDS("rr_embeddings_bert_uncased.Rds")
+```
+
+
+The textEmbed() function automatically transforms character variables in a given tibble to word embeddings. 
+
+> A word embedding comprises values that represent the latent meaning of a word.The numbers may be seen as coordinates in a space that comprises several hundred dimensions. The more similar two words’ embeddings are, the closer positioned they are in this embedding space, and thus, the more similar the words are in meaning. Hence, embeddings reflect the relationships among words, where proximity in the embedding space represents similarity in latent meaning. 
+
+#textTrain(): Examine the relationship between text and numeric variables
+
+The textTrain() is used to examine how well the word embeddings from a text can predict a numeric variable. This is done by training the word embeddings using ridge regression and 10-fold cross-validation. In the example below we examine how well the harmony text responses can predict the rating scale scores from the Harmony in life scale.
+
+```{r}
+# Examine the relationship between harmonytext word embeddings and the harmony in life rating scale
+
+model_htext_hils <- textTrain(word_embeddings$texts$harmonywords, 
+                              Language_based_assessment_data_8$hilstotal)
+
+# Examine the correlation between predicted and observed Harmony in life scale scores
+model_htext_hils$results
+
+```
