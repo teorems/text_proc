@@ -21,6 +21,8 @@ A partir du dataset `Restaurant_Reviews.tsv`, qui contient `nrow(rr)` critiques 
 # Définition du modele
 
 ```{r}
+
+#A ajouter : analyse du sentiment
 # Load required libraries
 library(tidymodels)
 library(textrecipes)
@@ -31,6 +33,12 @@ set.seed(123)
 split <- initial_split(rr, prop = 0.7)
 train_data <- training(split)
 test_data <- testing(split)
+
+```
+
+# One model
+
+```{r model_illustration}
 
 # Create a recipe for modeling
 recipe <- recipe(Liked ~ Review, data = train_data) %>%
@@ -74,9 +82,9 @@ autoplot(conf_matrix, type ="heatmap")
 # Metrics
 
 ```{r}
-
+class_metrics <- metric_set(accuracy, kap)
 # Calculate model accuracy
-res |> accuracy(.pred_class, Liked)
+res |> class_metrics(estimate = .pred_class, truth = Liked)
 
 ```
 
@@ -84,9 +92,11 @@ res |> accuracy(.pred_class, Liked)
 
 ```{r wf_map}
 
+# model specs
 rf <-  rand_forest(mode = "classification", mtry = tune(), trees = tune(), min_n = tune()) 
+xgb <- boost_tree(mode = "classification", tree_depth = tune(), learn_rate = tune(), trees = 1000)
 
-ws <- workflow_set(preproc = list(recipe), models = list(log_reg, rf))
+ws <- workflow_set(preproc = list(recipe), models = list(log_reg, rf, xgb))
 
 rr_cv <- vfold_cv(train_data)
 
@@ -112,6 +122,24 @@ library(text)
 rr_emb <- readRDS("rr_embeddings_bert_uncased.Rds")
 ```
 
+# PCA et projection sur les axes
+
+```{r}
+res_pca <- prcomp(rr_emb$texts$Review)
+
+summary(res_pca)
+
+X <- tibble(as.data.frame(res_pca$x)) |> 
+  bind_cols(review = rr$Review, liked = rr$Liked) |> 
+  mutate(id = row_number()) |> 
+  select(id, review, liked, everything())
+
+p <- ggplot(X, aes(PC2, PC4)) + geom_point(aes(text = paste(id,"-", review)), color = if_else(rr$Liked==1, 'blue', 'green'))
+
+library(plotly)
+
+ggplotly(p, tooltip = "text")
+```
 
 The textEmbed() function automatically transforms character variables in a given tibble to word embeddings. 
 
@@ -121,13 +149,3 @@ The textEmbed() function automatically transforms character variables in a given
 
 The textTrain() is used to examine how well the word embeddings from a text can predict a numeric variable. This is done by training the word embeddings using ridge regression and 10-fold cross-validation. In the example below we examine how well the harmony text responses can predict the rating scale scores from the Harmony in life scale.
 
-```{r}
-# Examine the relationship between harmonytext word embeddings and the harmony in life rating scale
-
-model_htext_hils <- textTrain(word_embeddings$texts$harmonywords, 
-                              Language_based_assessment_data_8$hilstotal)
-
-# Examine the correlation between predicted and observed Harmony in life scale scores
-model_htext_hils$results
-
-```
