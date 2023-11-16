@@ -27,3 +27,11 @@ wordembeddings <- textEmbed(texts = Language_based_assessment_data_8[1:2],
 
 # See how word embeddings are structured
 wordembeddings
+
+# The textEmbed() function automatically transforms character variables in a given tibble to word embeddings.
+#
+# > A word embedding comprises values that represent the latent meaning of a word.The numbers may be seen as coordinates in a space that comprises several hundred dimensions. The more similar two words’ embeddings are, the closer positioned they are in this embedding space, and thus, the more similar the words are in meaning. Hence, embeddings reflect the relationships among words, where proximity in the embedding space represents similarity in latent meaning.
+#
+# #textTrain(): Examine the relationship between text and numeric variables
+#
+# The textTrain() is used to examine how well the word embeddings from a text can predict a numeric variable. This is done by training the word embeddings using ridge regression and 10-fold cross-validation. In the example below we examine how well the harmony text responses can predict the rating scale scores from the Harmony in life scale.

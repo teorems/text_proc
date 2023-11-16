@@ -1,24 +1,27 @@
 ---
 output: html_document
 editor_options: 
-  chunk_output_type: console
+  chunk_output_type: inline
 ---
 
-# Récupération des données
 
 ```{r}
 library(readr)
 rr <- readr::read_tsv("Restaurant_Reviews.tsv", col_types = "cf")
-head(rr)
+
 ```
 
 
 # Objectif du projet
 
-A partir du dataset `Restaurant_Reviews.tsv`, qui contient `nrow(rr)` critiques de restaurants, [source] labellisées en 2 catégories, 0 (négative) et 1 (positive), nous allons développer un modèle de ML (classifier) qui permet de prédire la catégorie des nouvelles données.
+A partir du dataset `Restaurant_Reviews.tsv`, qui contient `nrow(rr)` critiques de restaurants, [source] labellisées en 2 catégories, 0 (négative) et 1 (positive), nous allons montrer comment développer, en utilisant le framework *Tidymodels*, un modèle de ML (classifier) qui permet de prédire la catégorie des nouvelles données.
+
+```{r}
+head(rr)
+```
 
 
-# Définition du modele
+# Définition d'un modèle
 
 ```{r}
 
@@ -36,11 +39,14 @@ test_data <- testing(split)
 
 ```
 
-# One model
+## One model
+
+Pour démontrer le procédé standard ainsi que la syntaxe typique de tidymodels on va développer un simple modèle de régression logistique que après la **tokenization** (décomposition des textes en mots) et le calcul du **tfidf** (indicateur qui permet de mesurer l'importance d'un mot dans une phrase par rapport à la fréquence de ce mot dans l'ensemble de textes ) :
+
 
 ```{r model_illustration}
 
-# Create a recipe for modeling
+# création d'une "recipe" (spécification des variables et preprocessing )
 recipe <- recipe(Liked ~ Review, data = train_data) %>%
   step_tokenize(Review) %>%
   step_tokenfilter(Review) %>%
@@ -48,68 +54,158 @@ recipe <- recipe(Liked ~ Review, data = train_data) %>%
 
 recipe
 
-# Create a logistic regression model
+# viz du df resultant après transformations
+recipe |> prep() |> bake(new_data = NULL)
+
+# modèle de base de régression logistique
 log_reg <- logistic_reg() %>%
   set_engine("glm") %>%
   set_mode("classification")
 
+log_reg
 
-# Create a workflow
+# création d'un workflow (modèle + rècipe)
 workflow <- workflow() %>%
   add_model(log_reg) %>%
   add_recipe(recipe)
 
 workflow
 
-# Train the model
+# entrainement sur le train_data
 model <- workflow %>% fit(train_data)
 
-# Make predictions on the test set
-predictions <- predict(model, new_data = test_data)
+# predictions sur les test set
+predictions <- predict(model, new_data = test_data, type = "prob") |> bind_cols(predict(model, new_data = test_data, type = "class"))
 
-# result tibble
-
+# resultats
 res <- bind_cols(predictions, test_data |>  select(Liked))
+head(res)
 
-# Evaluate the model
+```
+
+## Metrics
+
+```{r}
+# matrice de confusion
 conf_matrix <- conf_mat(res, truth = Liked, estimate = .pred_class)
 conf_matrix
 
+# ensemble de metrics categoriques derivées de conf_mat
+conf_matrix |> summary()
+
 # Print the confusion matrix
 autoplot(conf_matrix, type ="heatmap")
+
+# mise en place d'un indicateur qui contient de metrics
+class_metrics <- metric_set(roc_auc, accuracy, kap)
+
+# Calcul de metrics - parametre de prob en +
+res |> class_metrics(estimate = .pred_class, truth = Liked, .pred_1)
+
+# roc curve
+res |> roc_curve(truth = Liked, .pred_1) |> autoplot()
+
 ```
 
-# Metrics
+# Plusieurs modèles
 
-```{r}
-class_metrics <- metric_set(accuracy, kap)
-# Calculate model accuracy
-res |> class_metrics(estimate = .pred_class, truth = Liked)
-
-```
-
-# Many models
+On va comparer trois modèle differents : le modèle déjà utilisé de regression logistique, un random forest et un modele de boosting. Le modèles et le procédés de tuning sont 
 
 ```{r wf_map}
 
-# model specs
-rf <-  rand_forest(mode = "classification", mtry = tune(), trees = tune(), min_n = tune()) 
-xgb <- boost_tree(mode = "classification", tree_depth = tune(), learn_rate = tune(), trees = 1000)
+# mise en place du parallélisme (utilisation de plusieurs proces pour )
+library(doParallel)
+registerDoParallel()
 
+# model specs
+rf <-  rand_forest(mode = "classification", mtry = tune(), trees = 1000, min_n = tune()) 
+xgb <- boost_tree(mode = "classification", tree_depth = tune(), learn_rate = tune(), trees = 1000)
 ws <- workflow_set(preproc = list(recipe), models = list(log_reg, rf, xgb))
 
+ws
+
+# creation de 1O partition à partir des données d’entraînement
+set.seed(123)
 rr_cv <- vfold_cv(train_data)
 
-res <- workflow_map(ws, resamples = rr_cv)
+rr_cv
 
-res |> collect_metrics()
+# paramètre pour garder les prédictions et les modèles
+library(finetune)
+race_cont <- control_race(save_pred = TRUE, save_workflow = TRUE)
 
-autoplot(res)
+# application des modelés aux partitions obtenus avec la cross-validation et réglage des hyperparameters (~15min.)
+
+res <- readRDS("res_race_anova_3_mods.Rds")
+
+# system.time({
+# res <- workflow_map(ws, resamples = rr_cv, "tune_race_anova", control = race_cont)
+# })
+
+stopImplicitCluster()
 
 ```
 
+# Evaluation et comparaion
 
-# text embeddings
+```{r}
+# metrics
+res |> collect_metrics()
+
+res |> rank_results("roc_auc") |> 
+  filter(.metric == "roc_auc")
+
+autoplot(res,
+         rank_metric = "roc_auc",
+         metric = "roc_auc"
+         ) +
+  
+   geom_text(aes(y = mean - 0.03, label = wflow_id), angle = 90, hjust = 1) +
+   theme(legend.position = "none") + ylim(c(0.6,0.9))
+
+# plot detaillé d'un modèle specifique
+autoplot(res, id = "recipe_boost_tree")
+
+```
+
+# Choix du modèle
+
+```{r}
+best_results <- 
+   res %>% 
+   extract_workflow_set_result("recipe_rand_forest") %>% 
+   select_best(metric = "roc_auc")
+# best boosting model
+best_results
+
+best_results_last_fit <- 
+   res %>% 
+   extract_workflow("recipe_rand_forest") %>% 
+   finalize_workflow(best_results) %>% 
+   last_fit(split = split)
+
+collect_metrics(best_results_last_fit)
+```
+
+# Metrics & Roc Curve 
+
+```{r}
+
+#roc auc & other metrics
+best_results_last_fit
+fin_preds <- best_results_last_fit |> collect_predictions() |> select(.pred_1, .pred_class, Liked) 
+fin_preds
+fin_preds|> roc_curve(.pred_1, truth = Liked) |> autoplot()
+fin_preds |> class_metrics(estimate = .pred_class, truth = Liked, .pred_1)
+
+# confusion matrix & cat metrics
+(cm <- fin_preds|> conf_mat(.pred_class, truth = Liked))
+cm |> summary()
+autoplot(cm, type ="heatmap")
+```
+
+
+# Text embeddings
 
 ```{r}
 library(text)
@@ -134,18 +230,12 @@ X <- tibble(as.data.frame(res_pca$x)) |>
   mutate(id = row_number()) |> 
   select(id, review, liked, everything())
 
-p <- ggplot(X, aes(PC2, PC4)) + geom_point(aes(text = paste(id,"-", review)), color = if_else(rr$Liked==1, 'blue', 'green'))
+p <- ggplot(X, aes(PC4, PC5)) + geom_point(aes(text = paste(id,"-", review)), color = if_else(rr$Liked==1, 'blue', 'green'))
 
 library(plotly)
 
 ggplotly(p, tooltip = "text")
 ```
 
-The textEmbed() function automatically transforms character variables in a given tibble to word embeddings. 
 
-> A word embedding comprises values that represent the latent meaning of a word.The numbers may be seen as coordinates in a space that comprises several hundred dimensions. The more similar two words’ embeddings are, the closer positioned they are in this embedding space, and thus, the more similar the words are in meaning. Hence, embeddings reflect the relationships among words, where proximity in the embedding space represents similarity in latent meaning. 
-
-#textTrain(): Examine the relationship between text and numeric variables
-
-The textTrain() is used to examine how well the word embeddings from a text can predict a numeric variable. This is done by training the word embeddings using ridge regression and 10-fold cross-validation. In the example below we examine how well the harmony text responses can predict the rating scale scores from the Harmony in life scale.
 
