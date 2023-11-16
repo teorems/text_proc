@@ -107,7 +107,7 @@ res |> roc_curve(truth = Liked, .pred_1) |> autoplot()
 
 ```
 
-# Plusieurs modèles
+## Plusieurs modèles
 
 On va comparer trois modèle differents : le modèle déjà utilisé de regression logistique, un random forest et un modele de boosting. Le modèles et le procédés de tuning sont 
 
@@ -146,7 +146,7 @@ stopImplicitCluster()
 
 ```
 
-# Evaluation et comparaion
+## Evaluation et comparaison entre modèles
 
 ```{r}
 # metrics
@@ -168,7 +168,7 @@ autoplot(res, id = "recipe_boost_tree")
 
 ```
 
-# Choix du modèle
+## Choix du modèle
 
 ```{r}
 best_results <- 
@@ -187,7 +187,7 @@ best_results_last_fit <-
 collect_metrics(best_results_last_fit)
 ```
 
-# Metrics & Roc Curve 
+## Metrics & Roc Curve 
 
 ```{r}
 
@@ -205,20 +205,39 @@ autoplot(cm, type ="heatmap")
 ```
 
 
-# Text embeddings
+# Text embeddings (hugging face in r) avec la librairie `text`
+
+Examples d'origine dans la documentation de text appliqués au dataframe `rr`.`
 
 ```{r}
 library(text)
 # !! operation assez longue !!
-#rr_emb <- textEmbed(rr)
+# rr_emb <- textEmbed(rr)
 # Completed layers output for Review (variable: 1/1, duration: 4.267763 mins).
 # Completed layers aggregation for word_type_embeddings. 
 # Completed layers aggregation (variable 1/1, duration: 7.010227 mins).
 # Completed layers aggregation (variable 1/1, duration: 7.108091 mins).
 rr_emb <- readRDS("rr_embeddings_bert_uncased.Rds")
 ```
+## textTrain() : Examiner la relation entre les textes et la variable `Liked`
 
-# PCA et projection sur les axes
+La fonction `textTrain()` est utilisée pour examiner dans quelle mesure les mots intégrés d'un texte peuvent prédire une variable numérique. Pour ce faire, les word embeddings sont entraînés à l'aide d'un modèle de random forest e et de la validation croisée 10 fois. 
+
+
+```{r, eval = evaluate,  warning=FALSE, message=FALSE}
+library(text)
+
+# Examinons la relation entre les word embeddings de `Reviews`et si la critique a été positive ou non (`Liked`)
+model_rr_liked <- textTrain(rr_emb$texts$Review, 
+                              rr$Liked)
+
+# Métriques du modèle
+model_rr_liked$results
+
+```
+
+
+## PCA et projection sur les axes
 
 ```{r}
 res_pca <- prcomp(rr_emb$texts$Review)
@@ -237,5 +256,67 @@ library(plotly)
 ggplotly(p, tooltip = "text")
 ```
 
+## Word types
+
+```{r}
+library(text)
+# !! operation assez longue !!
+# #rr_emb_wt <- textEmbed(rr, 
+#                     aggregation_from_tokens_to_word_types = "mean",
+#                     keep_token_embeddings = FALSE)
+# Completed layers output for Review (variable: 1/1, duration: 4.267763 mins).
+# Completed layers aggregation for word_type_embeddings. 
+# Completed layers aggregation (variable 1/1, duration: 7.010227 mins).
+# Completed layers aggregation (variable 1/1, duration: 7.108091 mins).
+rr_emb_wt <- readRDS("rr_embeddings_bert_uncased_wt.Rds")
+```
+
+<!-- ## Tracer les mots statistiquement significatifs  -->
+<!-- Le paquet texte propose plusieurs façons de tracer les mots ; nous utiliserons ici le tracé dimensionnel supervisé. Le tracé se fait en deux étapes : Tout d'abord, la fonction `textProjection` pré-traite les données, y compris le calcul des statistiques pour chaque type de mot à tracer. Ensuite, la fonction `textProjectionPlot()` visualise les mots, en incluant de nombreuses options pour définir la couleur, la police, etc. de la figure. Diviser cette procédure en deux étapes rend le processus plus transparent (puisque l'utilisateur peut naturellement voir la sortie selon laquelle les mots sont tracés) et plus rapide puisque les calculs les plus lourds sont effectués dans la première étape, la dernière étape est plus rapide de sorte que l'on peut essayer différents paramètres de conception.  -->
+
+
+<!-- ### textProjection(): Prétraitement des données pour le traçage  -->
+<!-- ```{r, eval = evaluate, warning=FALSE, message=FALSE} -->
+<!-- library(text) -->
+
+<!-- # Pre-process data -->
+<!-- projection_results <- textProjection( -->
+<!--   words = rr$Reviews, -->
+<!--   word_embeddings = rr_emb_wt$texts, -->
+<!--   word_types_embeddings = rr_emb_wt$word_types, -->
+<!--   x = rr$Liked, -->
+<!-- ) -->
+<!-- projection_results$word_data -->
+
+<!-- ``` -->
+
+<!-- ### textProjectionPlot(): A nuage de mot en deux dimensions -->
+<!-- ```{r, eval = evaluate, warning=FALSE, message=FALSE, dpi=300} -->
+<!-- library(text) -->
+<!-- # Supervised Dimension Projection Plot -->
+<!-- # To avoid warnings -- and that words do not get plotted, first increase the max.overlaps for the entire session:  -->
+<!-- options(ggrepel.max.overlaps = 1000) -->
+
+<!-- # Supervised Dimension Projection Plot -->
+<!-- plot_projection_2D <- textProjectionPlot( -->
+<!--   word_data = projection_results, -->
+<!--  min_freq_words_plot = 1, -->
+<!--  plot_n_word_extreme = 10, -->
+<!--  plot_n_word_frequency = 5, -->
+<!--  plot_n_words_middle = 5, -->
+<!--  y_axes = TRUE, -->
+<!--  p_alpha = 0.05, -->
+<!--  p_adjust_method = "fdr", -->
+<!--   title_top = "Restaurant Reviews (Supervised Dimension Projection)", -->
+<!--   x_axes_label = "Not Liked vs. Liked", -->
+<!--   bivariate_color_codes = c("#E07f6a", "#60A1F7", "#85DB8E", -->
+<!--                             "#FF0000", "#EAEAEA", "#5dc688", -->
+<!--                             "#E07f6a", "#60A1F7", "#85DB8E" -->
+<!-- )) -->
+<!-- # View plot -->
+<!-- plot_projection_2D$final_plot -->
+
+
+<!-- ``` -->
 
 

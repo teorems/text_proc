@@ -21,7 +21,7 @@ embeddings
 library(text)
 
 # Transform the text data to BERT word embeddings
-wordembeddings <- textEmbed(texts = Language_based_assessment_data_8[1:2],
+wordembeddings <- textEmbed(texts = Language_based_assessment_data_8[1:10,1:2],
                             aggregation_from_tokens_to_word_types = "mean",
                             keep_token_embeddings = FALSE)
 
