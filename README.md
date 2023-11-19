@@ -1,3 +1,5 @@
-# text_proc
+# Analysing restaurant reviews
 
-trying to do some things with text in R
+Trying to do some sentiment analysis and prediction.
+
+The main file is text_recipes.Rmd.

@@ -1,16 +1,15 @@
 ---
+title: "Restaurant reviews"
+author: "Emmanuel Messori"
 output: html_document
 editor_options: 
   chunk_output_type: inline
 ---
 
-
 ```{r}
 library(readr)
 rr <- readr::read_tsv("Restaurant_Reviews.tsv", col_types = "cf")
-
 ```
-
 
 # Objectif du projet
 
@@ -20,12 +19,10 @@ A partir du dataset `Restaurant_Reviews.tsv`, qui contient `nrow(rr)` critiques 
 head(rr)
 ```
 
-
 # Définition d'un modèle
 
 ```{r}
-
-#A ajouter : analyse du sentiment
+# A ajouter : analyse du sentiment
 # Load required libraries
 library(tidymodels)
 library(textrecipes)
@@ -36,51 +33,50 @@ set.seed(123)
 split <- initial_split(rr, prop = 0.7)
 train_data <- training(split)
 test_data <- testing(split)
-
 ```
 
 ## One model
 
 Pour démontrer le procédé standard ainsi que la syntaxe typique de tidymodels on va développer un simple modèle de régression logistique que après la **tokenization** (décomposition des textes en mots) et le calcul du **tfidf** (indicateur qui permet de mesurer l'importance d'un mot dans une phrase par rapport à la fréquence de ce mot dans l'ensemble de textes ) :
 
-
 ```{r model_illustration}
-
 # création d'une "recipe" (spécification des variables et preprocessing )
-recipe <- recipe(Liked ~ Review, data = train_data) %>%
-  step_tokenize(Review) %>%
-  step_tokenfilter(Review) %>%
-  step_tfidf(Review) 
+recipe <- recipe(Liked ~ Review, data = train_data) |>
+  step_tokenize(Review) |>
+  step_stopwords(Review) |>
+  step_tokenfilter(Review) |>
+  step_tfidf(Review)
 
 recipe
 
 # viz du df resultant après transformations
-recipe |> prep() |> bake(new_data = NULL)
+recipe |>
+  prep() |>
+  bake(new_data = NULL)
 
 # modèle de base de régression logistique
-log_reg <- logistic_reg() %>%
-  set_engine("glm") %>%
+log_reg <- logistic_reg() |>
+  set_engine("glm") |>
   set_mode("classification")
 
 log_reg
 
 # création d'un workflow (modèle + rècipe)
-workflow <- workflow() %>%
-  add_model(log_reg) %>%
+wf_log <- workflow() |>
+  add_model(log_reg) |>
   add_recipe(recipe)
 
-workflow
+wf_log
 
 # entrainement sur le train_data
-model <- workflow %>% fit(train_data)
+model <- wf_log |> fit(train_data)
 
 # predictions sur les test set
 predictions <- predict(model, new_data = test_data, type = "prob") |> bind_cols(predict(model, new_data = test_data, type = "class"))
 
 # resultats
-res <- bind_cols(predictions, test_data |>  select(Liked))
+res <- bind_cols(predictions, test_data |> select(Liked))
 head(res)
-
 ```
 
 ## Metrics
@@ -94,7 +90,7 @@ conf_matrix
 conf_matrix |> summary()
 
 # Print the confusion matrix
-autoplot(conf_matrix, type ="heatmap")
+autoplot(conf_matrix, type = "heatmap")
 
 # mise en place d'un indicateur qui contient de metrics
 class_metrics <- metric_set(roc_auc, accuracy, kap)
@@ -103,24 +99,40 @@ class_metrics <- metric_set(roc_auc, accuracy, kap)
 res |> class_metrics(estimate = .pred_class, truth = Liked, .pred_1)
 
 # roc curve
-res |> roc_curve(truth = Liked, .pred_1) |> autoplot()
-
+res |>
+  roc_curve(truth = Liked, .pred_1) |>
+  autoplot()
 ```
 
 ## Plusieurs modèles
 
-On va comparer trois modèle differents : le modèle déjà utilisé de regression logistique, un random forest et un modele de boosting. Le modèles et le procédés de tuning sont 
+On va comparer trois modèle differents : le modèle déjà utilisé de regression logistique, un random forest et un modele de boosting. Le modèles et le procédés de tuning sont
 
 ```{r wf_map}
-
 # mise en place du parallélisme (utilisation de plusieurs proces pour )
-library(doParallel)
-registerDoParallel()
+# library(doParallel)
+# registerDoParallel()
 
 # model specs
-rf <-  rand_forest(mode = "classification", mtry = tune(), trees = 1000, min_n = tune()) 
-xgb <- boost_tree(mode = "classification", tree_depth = tune(), learn_rate = tune(), trees = 1000)
-ws <- workflow_set(preproc = list(recipe), models = list(log_reg, rf, xgb))
+rf <-
+  rand_forest(
+    mode = "classification",
+    mtry = tune(),
+    trees = 1000,
+    min_n = tune()
+  )
+xgb <-
+  boost_tree(
+    mode = "classification",
+    tree_depth = tune(),
+    learn_rate = tune(),
+    trees = 1000
+  )
+ws <-
+  workflow_set(
+    preproc = list(recipe),
+    models = list(log_reg, rf, xgb)
+  )
 
 ws
 
@@ -141,9 +153,6 @@ res <- readRDS("res_race_anova_3_mods.Rds")
 # system.time({
 # res <- workflow_map(ws, resamples = rr_cv, "tune_race_anova", control = race_cont)
 # })
-
-stopImplicitCluster()
-
 ```
 
 ## Evaluation et comparaison entre modèles
@@ -152,171 +161,211 @@ stopImplicitCluster()
 # metrics
 res |> collect_metrics()
 
-res |> rank_results("roc_auc") |> 
+res |>
+  rank_results("roc_auc") |>
   filter(.metric == "roc_auc")
 
 autoplot(res,
-         rank_metric = "roc_auc",
-         metric = "roc_auc"
-         ) +
-  
-   geom_text(aes(y = mean - 0.03, label = wflow_id), angle = 90, hjust = 1) +
-   theme(legend.position = "none") + ylim(c(0.6,0.9))
+  rank_metric = "roc_auc",
+  metric = "roc_auc"
+) +
 
-# plot detaillé d'un modèle specifique
-autoplot(res, id = "recipe_boost_tree")
+  geom_text(aes(y = mean - 0.03, label = wflow_id), angle = 90, hjust = 1) +
+  theme(legend.position = "none") + ylim(c(0.6, 0.9))
 
+# graphique des paramétrages testés  du modèle
+autoplot(res, id = "recipe_rand_forest")
 ```
 
 ## Choix du modèle
 
 ```{r}
-best_results <- 
-   res %>% 
-   extract_workflow_set_result("recipe_rand_forest") %>% 
-   select_best(metric = "roc_auc")
+best_results <-
+  res |>
+  extract_workflow_set_result("recipe_rand_forest") |>
+  select_best(metric = "roc_auc")
 # best boosting model
 best_results
 
-best_results_last_fit <- 
-   res %>% 
-   extract_workflow("recipe_rand_forest") %>% 
-   finalize_workflow(best_results) %>% 
-   last_fit(split = split)
+best_results_last_fit <-
+  res |>
+  extract_workflow("recipe_rand_forest") |>
+  finalize_workflow(best_results) |>
+  last_fit(split = split)
 
 collect_metrics(best_results_last_fit)
 ```
 
-## Metrics & Roc Curve 
+## Metrics & Roc Curve
 
 ```{r}
-
-#roc auc & other metrics
+# roc auc & other metrics
 best_results_last_fit
-fin_preds <- best_results_last_fit |> collect_predictions() |> select(.pred_1, .pred_class, Liked) 
+fin_preds <- best_results_last_fit |>
+  collect_predictions() |>
+  select(.pred_1, .pred_class, Liked)
 fin_preds
-fin_preds|> roc_curve(.pred_1, truth = Liked) |> autoplot()
-fin_preds |> class_metrics(estimate = .pred_class, truth = Liked, .pred_1)
+fin_preds |>
+  roc_curve(.pred_1, 
+            truth = Liked) |>
+  autoplot()
+fin_preds |> 
+  class_metrics(estimate = .pred_class, 
+                truth = Liked, .pred_1)
 
 # confusion matrix & cat metrics
-(cm <- fin_preds|> conf_mat(.pred_class, truth = Liked))
+(cm <- fin_preds |> 
+    conf_mat(.pred_class, 
+             truth = Liked))
 cm |> summary()
-autoplot(cm, type ="heatmap")
+autoplot(cm, type = "heatmap")
 ```
-
 
 # Text embeddings (hugging face in r) avec la librairie `text`
 
-Examples d'origine dans la documentation de text appliqués au dataframe `rr`.`
+Examples d'origine dans la documentation de `text` appliqués au dataframe `rr`.\`
+Nous allons charger un objet qui contient les word embeddings obtenus grace à un modèle *bert*.
 
 ```{r}
 library(text)
 # !! operation assez longue !!
 # rr_emb <- textEmbed(rr)
 # Completed layers output for Review (variable: 1/1, duration: 4.267763 mins).
-# Completed layers aggregation for word_type_embeddings. 
+# Completed layers aggregation for word_type_embeddings.
 # Completed layers aggregation (variable 1/1, duration: 7.010227 mins).
 # Completed layers aggregation (variable 1/1, duration: 7.108091 mins).
 rr_emb <- readRDS("rr_embeddings_bert_uncased.Rds")
+str(rr_emb, 2)
 ```
+
 ## textTrain() : Examiner la relation entre les textes et la variable `Liked`
 
-La fonction `textTrain()` est utilisée pour examiner dans quelle mesure les mots intégrés d'un texte peuvent prédire une variable numérique. Pour ce faire, les word embeddings sont entraînés à l'aide d'un modèle de random forest e et de la validation croisée 10 fois. 
+La fonction `textTrain()` est utilisée pour examiner dans quelle mesure les mots intégrés d'un texte peuvent prédire une variable numérique. Pour ce faire, les word embeddings sont entraînés à l'aide d'un modèle de random forest e et de la validation croisée 10 fois.
 
-
-```{r, eval = evaluate,  warning=FALSE, message=FALSE}
+```{r, warning=FALSE, message=FALSE}
 library(text)
 
 # Examinons la relation entre les word embeddings de `Reviews`et si la critique a été positive ou non (`Liked`)
-model_rr_liked <- textTrain(rr_emb$texts$Review, 
-                              rr$Liked)
+model_rr_liked <- textTrainRandomForest(
+  rr_emb$texts$Review,
+  rr$Liked,
+  multi_cores = TRUE
+)
 
 # Métriques du modèle
 model_rr_liked$results
-
 ```
 
+Ces embeddings permet d'atteindre des résultats beaucoup superiéures à ceux d'un modèle entraîné seulement sur le jeu de training.
 
 ## PCA et projection sur les axes
+
+Pour mieux étudier les valeurs attribués aux phrases par le procédé d'embedding, nous allons appliquer une technique de réduction des dimensions et allons projeter les composantes résultantes sur un plan.
+
+Si nous allons comparer certaines dimensions nous noterons des relations intéressantes entre "vérité terrain" (le valeur de \`Liked\`) et la distribution sur le plan, avec des groupes homogènes.
 
 ```{r}
 res_pca <- prcomp(rr_emb$texts$Review)
 
-summary(res_pca)
-
-X <- tibble(as.data.frame(res_pca$x)) |> 
-  bind_cols(review = rr$Review, liked = rr$Liked) |> 
-  mutate(id = row_number()) |> 
+res_pca_emb_X <- tibble(as.data.frame(res_pca$x)) |>
+  bind_cols(review = rr$Review, liked = rr$Liked) |>
+  mutate(id = row_number()) |>
   select(id, review, liked, everything())
 
-p <- ggplot(X, aes(PC4, PC5)) + geom_point(aes(text = paste(id,"-", review)), color = if_else(rr$Liked==1, 'blue', 'green'))
+p <-
+  ggplot(res_pca_emb_X, aes(PC4, PC5)) +
+  geom_point(aes(text = paste(id, "-", review)),
+    color = if_else(rr$Liked ==
+      1, "blue", "green")
+  )
 
 library(plotly)
 
 ggplotly(p, tooltip = "text")
 ```
 
-## Word types
+## Word Types
+
+Nous allons charger à nouveau les word embeddings resultants d'un modèle bert mais cette fois avec le resultats agregés des mots:
 
 ```{r}
-library(text)
 # !! operation assez longue !!
-# #rr_emb_wt <- textEmbed(rr, 
+# #rr_emb_wt <- textEmbed(rr,
 #                     aggregation_from_tokens_to_word_types = "mean",
 #                     keep_token_embeddings = FALSE)
 # Completed layers output for Review (variable: 1/1, duration: 4.267763 mins).
-# Completed layers aggregation for word_type_embeddings. 
+# Completed layers aggregation for word_type_embeddings.
 # Completed layers aggregation (variable 1/1, duration: 7.010227 mins).
 # Completed layers aggregation (variable 1/1, duration: 7.108091 mins).
 rr_emb_wt <- readRDS("rr_embeddings_bert_uncased_wt.Rds")
+str(rr_emb_wt, 2)
+rr_emb_wt$word_types |> 
+  arrange(desc(n)) |> 
+  head()
 ```
 
-<!-- ## Tracer les mots statistiquement significatifs  -->
-<!-- Le paquet texte propose plusieurs façons de tracer les mots ; nous utiliserons ici le tracé dimensionnel supervisé. Le tracé se fait en deux étapes : Tout d'abord, la fonction `textProjection` pré-traite les données, y compris le calcul des statistiques pour chaque type de mot à tracer. Ensuite, la fonction `textProjectionPlot()` visualise les mots, en incluant de nombreuses options pour définir la couleur, la police, etc. de la figure. Diviser cette procédure en deux étapes rend le processus plus transparent (puisque l'utilisateur peut naturellement voir la sortie selon laquelle les mots sont tracés) et plus rapide puisque les calculs les plus lourds sont effectués dans la première étape, la dernière étape est plus rapide de sorte que l'on peut essayer différents paramètres de conception.  -->
+## Produire un graphique des mots statistiquement significatifs
 
+La fonction `textProjectionPlot()` visualise les mots, en incluant de nombreuses options pour définir la couleur, la police, etc. de la figure. 
 
-<!-- ### textProjection(): Prétraitement des données pour le traçage  -->
-<!-- ```{r, eval = evaluate, warning=FALSE, message=FALSE} -->
-<!-- library(text) -->
+### textProjection(): Prétraitement des données pour le traçage
 
-<!-- # Pre-process data -->
-<!-- projection_results <- textProjection( -->
-<!--   words = rr$Reviews, -->
-<!--   word_embeddings = rr_emb_wt$texts, -->
-<!--   word_types_embeddings = rr_emb_wt$word_types, -->
-<!--   x = rr$Liked, -->
-<!-- ) -->
-<!-- projection_results$word_data -->
+```{r, eval = evaluate, warning=FALSE, message=FALSE}
+library(text)
+library(tm)
 
-<!-- ``` -->
+# textes obtenus après la suppression de la ponctuation, stop_words, espaces vides
+clean_reviews <- rr$Review |> 
+  removePunctuation() |> 
+  removeWords(stopwords()) |> 
+  stripWhitespace()
 
-<!-- ### textProjectionPlot(): A nuage de mot en deux dimensions -->
-<!-- ```{r, eval = evaluate, warning=FALSE, message=FALSE, dpi=300} -->
-<!-- library(text) -->
-<!-- # Supervised Dimension Projection Plot -->
-<!-- # To avoid warnings -- and that words do not get plotted, first increase the max.overlaps for the entire session:  -->
-<!-- options(ggrepel.max.overlaps = 1000) -->
+# Pre-process data
 
-<!-- # Supervised Dimension Projection Plot -->
-<!-- plot_projection_2D <- textProjectionPlot( -->
-<!--   word_data = projection_results, -->
-<!--  min_freq_words_plot = 1, -->
-<!--  plot_n_word_extreme = 10, -->
-<!--  plot_n_word_frequency = 5, -->
-<!--  plot_n_words_middle = 5, -->
-<!--  y_axes = TRUE, -->
-<!--  p_alpha = 0.05, -->
-<!--  p_adjust_method = "fdr", -->
-<!--   title_top = "Restaurant Reviews (Supervised Dimension Projection)", -->
-<!--   x_axes_label = "Not Liked vs. Liked", -->
-<!--   bivariate_color_codes = c("#E07f6a", "#60A1F7", "#85DB8E", -->
-<!--                             "#FF0000", "#EAEAEA", "#5dc688", -->
-<!--                             "#E07f6a", "#60A1F7", "#85DB8E" -->
-<!-- )) -->
-<!-- # View plot -->
-<!-- plot_projection_2D$final_plot -->
+projection_results <- textProjection(
+  words = clean_reviews,
+  word_embeddings = rr_emb_wt$texts,
+  word_types_embeddings = rr_emb_wt$word_types,
+  x = as.numeric(rr$Liked),
+)
 
+projection_results$word_data |> 
+  slice_max(n, n = 5)
+```
 
-<!-- ``` -->
+### textProjectionPlot(): Un nuage de mot en deux dimensions
 
+```{r, eval = evaluate, warning=FALSE, message=FALSE, dpi=300}
+library(text)
 
+# Supervised Dimension Projection Plot
+
+# To avoid warnings -- and that words do not get plotted, first increase the max.overlaps for the entire session:
+
+options(ggrepel.max.overlaps = 1000)
+
+# Supervised Dimension Projection Plot
+
+plot_projection_2D <- textProjectionPlot(
+  word_data = projection_results,
+  min_freq_words_plot = 1,
+  plot_n_word_extreme = 10,
+  plot_n_word_frequency = 5,
+  plot_n_words_middle = 5,
+  y_axes = FALSE,
+  p_alpha = 0.05,
+  p_adjust_method = "fdr",
+  title_top = "Restaurant Reviews (Supervised Dimension Projection)",
+  x_axes_label = "Words in Liked vs. Not Liked",
+  bivariate_color_codes = rev(c(
+    "#E07f6a", "#60A1F7", "#85DB8E",
+    "#FF0000", "#EAEAEA", "#5dc688",
+    "#E07f6a", "#60A1F7", "#85DB8E"
+  )
+  )
+)
+
+# View plot
+
+plot_projection_2D$final_plot
+```
